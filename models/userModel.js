@@ -23,11 +23,13 @@ const userSchema = new Schema({
   },
 
   degrees: [{
+    _id: { type: Schema.Types.ObjectId, auto: true }, 
     title: { type: String },
     institute: { type: String },
     year: { type: Number }
   }],
   awards: [{
+   _id: { type: Schema.Types.ObjectId, auto: true }, 
     title: { type: String },
     description: { type: String },
     imageUrl: { type: String },
