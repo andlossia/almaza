@@ -1,9 +1,7 @@
-const functions = require('firebase-functions');
 const mongoose = require('mongoose');
 const { MongoClient, GridFSBucket } = require('mongodb');
 const startCronJobs = require('./cron'); 
 const dotenv = require('dotenv');
-
 dotenv.config();
 
 let bucket;
@@ -11,16 +9,12 @@ let mongoClient;
 
 const connectToDatabase = async () => {
   try {
-    // Use the dbUri from Firebase configuration
-    const dbUri = functions.config().mongodb.uri; // Ensure functions is imported
-    console.log('Connecting to MongoDB with URI:', dbUri);
-    
     // Connect using Mongoose
-    await mongoose.connect(dbUri, { });
+    await mongoose.connect(process.env.DB_URI, { });
     console.log('MongoDB connected successfully');
     
     // Connect using MongoClient for GridFS
-    mongoClient = new MongoClient(dbUri, { });
+    mongoClient = new MongoClient(process.env.DB_URI, { });
     await mongoClient.connect();
     
     const db = mongoClient.db();
