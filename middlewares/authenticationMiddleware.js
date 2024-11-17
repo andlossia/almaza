@@ -35,41 +35,35 @@ const checkRole = (roles) => (req, res, next) => {
 };
 
 // Middleware to authorize owner or specific roles for a resource
-const authorizeOwnerOrRole = (Model, roles = []) => {
+const authorizeOwnerOrRole = (Model, modelName, requiredRoles = []) => {
   return async (req, res, next) => {
     try {
-      // Fetch item by ID from the database
+      // Retrieve the user from the request object (after authentication)
+      const userId = req.user.id;
+      
+      // Find the item by ID
       const item = await Model.findById(req.params.id);
-
       if (!item) {
-        console.warn(`Item not found: ${req.params.id}`);
-        return res.status(404).json({ message: 'Item not found' });
+        return res.status(404).json({ message: `${modelName} not found` });
       }
 
-      // Check ownership and roles
-      const itemOwnerId = item.owner?.toString() || null;
-      const userId = req.user?.id?.toString() || null;
+      // Check if the user is the owner of the item
+      const isOwner = item.owner && item.owner.toString() === userId.toString();
+      
+      // Check if the user has an appropriate role (e.g., admin or other roles)
+      const hasRolePermission = req.user.roles && requiredRoles.some(role => req.user.roles.includes(role));
 
-      if (!itemOwnerId || !userId) {
-        console.error('Authorization data is missing');
-        return res.status(500).json({ message: 'Authorization data is missing' });
+      // If the user is either the owner or has the necessary role, proceed
+      if (isOwner || hasRolePermission) {
+        return next();
+      } else {
+        return res.status(403).json({ message: "Forbidden: You are not authorized to delete this item" });
       }
-
-      const isOwner = itemOwnerId === userId;
-      const userRoles = Array.isArray(req.user.roles) ? req.user.roles : [];
-      const validRoles = Array.isArray(roles) ? roles : [];
-      const hasRole = validRoles.some(role => userRoles.includes(role));
-
-      if (!isOwner && !hasRole) {
-        console.warn(`User is not authorized: User ID: ${userId}, Item Owner ID: ${itemOwnerId}`);
-        return res.status(403).json({ message: 'Forbidden' });
-      }
-
-      req.actionMadeBy = isOwner ? 'owner' : hasRole ? 'role' : 'unknown';
-      next();
     } catch (error) {
-      console.error('Authorization Error:', error.message);
-      return res.status(500).json({ message: 'Internal error during authorization.', error: error.message });
+      res.status(500).json({
+        message: `Error authorizing action for ${modelName}`,
+        error: error.message,
+      });
     }
   };
 };
