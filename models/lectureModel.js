@@ -9,6 +9,7 @@ const lectureSchema = new Schema({
     media: { type: Schema.Types.ObjectId, ref: 'Media' },
     slug: { type: String, required: true },
     imageUrl: { type: String },
+    content: {type: String},
     owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     lectureType: { type: String, required: true },
     published: { type: Boolean, default: false },
