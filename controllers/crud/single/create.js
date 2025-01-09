@@ -1,9 +1,6 @@
 const { dynamicUpload } = require('../../../middlewares/uploadFilesMiddleware');
 const { authenticate } = require('../../../middlewares/authenticationMiddleware');
 
-
-
-
 const createItem = (Model, modelName, uniqueFields) => [
     authenticate,
     dynamicUpload(),
