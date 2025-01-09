@@ -2,21 +2,46 @@ const { validationResult } = require('express-validator');
 const { dynamicUpload } = require('../../middlewares/uploadFilesMiddleware');
 const { authenticate, authorizeOwnerOrRole } = require('../../middlewares/authenticationMiddleware');
 
-const { readItem,readItemBySlug, readItemByField } = require('../crud/single/read');
+const singleRead = require('../crud/single/read');
 const readBulk = require('../crud/bulk/read');
 
 const initController = (Model, modelName, customMethods = [], uniqueFields = []) => {
 
   const validateRequest = (validations) => {
     return async (req, res, next) => {
-      await Promise.all(validations.map(validation => validation.run(req)));
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({ errors: errors.array() });
+      try {
+        await Promise.all(validations.map((validation) => validation.run(req)));
+
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+          return res.status(400).json({ errors: errors.array() });
+        }
+  
+        if (req.body) {
+          for (const [key, value] of Object.entries(req.body)) {
+            if (value instanceof Map) {
+              for (const [mapKey, mapValue] of value.entries()) {
+                if (typeof mapKey !== 'string' || !mapKey.trim()) {
+                  return res.status(400).json({
+                    errors: [{ message: `Invalid key "${mapKey}" in "${key}": Must be a non-empty string.` }],
+                  });
+                }
+                if (typeof mapValue !== 'string' || !mapValue.trim()) {
+                  return res.status(400).json({
+                    errors: [{ message: `Invalid value for key "${mapKey}" in "${key}": Must be a non-empty string.` }],
+                  });
+                }
+              }
+            }
+          }
+        }
+        next();
+      } catch (error) {
+        res.status(500).json({ message: 'Validation error', error: error.message });
       }
-      next();
     };
   };
+  
 
   const checkUniqueFields = (uniqueFields, Model, modelName, isUpdate = false) => async (req, res, next) => {
     try {
@@ -172,9 +197,12 @@ const initController = (Model, modelName, customMethods = [], uniqueFields = [])
     ],
     
     getItems: readBulk(Model, modelName),
-    getItem: readItem(Model, modelName),
-    getItemBySlug: readItemBySlug(Model, modelName),
-    getItemByField: readItemByField(Model, modelName),
+    getItem: singleRead.readItem(Model, modelName),
+    getItemBySlug: singleRead.readItemBySlug(Model, modelName),
+    getItemByField: singleRead.readItemByField(Model, modelName),
+    getFieldById: singleRead.readFieldById(Model, modelName),
+
+    
 
     updateItem: [
       authenticate,
