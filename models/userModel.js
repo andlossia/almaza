@@ -21,7 +21,14 @@ const userSchema = new Schema({
       vision: { type: String },
     },
   },
-
+bio_he: {
+    by: { type: Schema.Types.ObjectId, ref: 'User' },
+    section: {
+      about: { type: String },
+      description: { type: String },
+      vision: { type: String },
+    },
+  },
   degrees: [{
     _id: { type: Schema.Types.ObjectId, auto: true }, 
     title: { type: String },
