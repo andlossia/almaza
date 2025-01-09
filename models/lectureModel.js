@@ -6,6 +6,7 @@ const applyToJSON = require('../middlewares/applyToJson');
 const lectureSchema = new Schema({
     title: { type: String, required: true },
     description: { type: String, required: true },
+    language: { type: String},
     media: { type: Schema.Types.ObjectId, ref: 'Media' },
     slug: { type: String, required: true },
     imageUrl: { type: String },
