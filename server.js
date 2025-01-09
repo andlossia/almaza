@@ -12,15 +12,19 @@ const corsOptions = {
   origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization'],
-  credentials: true // Add this line if your frontend requires credentials like cookies or auth headers
+  credentials: true,
 };
 
+// Middleware to disable request timeout
+app.use((req, res, next) => {
+  req.setTimeout(0);
+  next();
+});
+
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); 
-
-
-app.use(bodyParser.json({ limit: '50mb' }));
-app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
+app.options('*', cors(corsOptions));
+app.use(bodyParser.json({ limit: '1024mb' }));
+app.use(bodyParser.urlencoded({ limit: '1024mb', extended: true }));
 app.use(responseHandler);
 
 
