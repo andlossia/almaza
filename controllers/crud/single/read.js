@@ -1,8 +1,17 @@
+const verifyVideoAccess = require('../../../utils/verifyAccess');
 
-const readItem = (Model, modelName) => async (req, res) => {
+const singleRead = {
+  readItem: (Model, modelName) => async (req, res) => {
     try {
-      let itemQuery = Model.findById(req.params._id);
-      const item = await itemQuery;
+      const item = await Model.findById(req.params._id);
+
+      if (modelName.toLowerCase() === 'video') {
+        const accessGranted = await verifyVideoAccess(req.user, item);
+        if (!accessGranted) {
+          return res.status(403).json({ message: 'Access denied to this video' });
+        }
+      }
+
       if (!item) {
         return res.status(404).json({ message: `${modelName} not found` });
       }
@@ -13,11 +22,19 @@ const readItem = (Model, modelName) => async (req, res) => {
         error: error.message,
       });
     }
-  };
+  },
 
-  const readItemBySlug = (Model, modelName) => async (req, res) => {
+  readItemBySlug: (Model, modelName) => async (req, res) => {
     try {
       const item = await Model.findOne({ slug: req.params.slug });
+
+      if (modelName.toLowerCase() === 'video') {
+        const accessGranted = await verifyVideoAccess(req.user, item);
+        if (!accessGranted) {
+          return res.status(403).json({ message: 'Access denied to this video' });
+        }
+      }
+
       if (!item) {
         return res.status(404).json({ message: `${modelName} not found` });
       }
@@ -28,27 +45,84 @@ const readItem = (Model, modelName) => async (req, res) => {
         error: error.message,
       });
     }
-  };
+  },
+
+  readItemByField: (Model, modelName, allowedKeys = []) => async (req, res) => {
+    const { key, value } = req.params;
+    const { single, sort, limit } = req.query;
   
-  const readItemByField = (Model, modelName) => async (req, res) => {
-    const { key, value } = req.params; // Extracting key and value from params
+    if (allowedKeys.length > 0 && !allowedKeys.includes(key)) {
+      return res.status(400).json({
+        message: `Invalid field '${key}'. Allowed fields: ${allowedKeys.join(', ')}`,
+      });
+    }
+  
     try {
-      const item = await Model.findOne({ [key]: value });
-      if (!item) {
+      let items;
+  
+      if (sort === 'rand') {
+        const pipeline = [
+          { $match: { [key]: value } },
+          { $sample: { size: Number(limit) || 1 } },
+        ];
+        items = await Model.aggregate(pipeline);
+      } else {
+        let query = Model.find({ [key]: value });
+  
+        if (sort) {
+          query = query.sort(sort);
+        }
+  
+        if (limit) {
+          query = query.limit(Number(limit));
+        }
+  
+        if (single) {
+          query = query.limit(1);
+        }
+  
+        items = await query.exec();
+      }
+  
+      if (!items || items.length === 0) {
         return res.status(404).json({ message: `${modelName} not found` });
       }
-      res.status(200).json(item);
+  
+      res.status(200).json(single ? items[0] : items);
     } catch (error) {
       res.status(500).json({
         message: `Error fetching ${modelName}`,
         error: error.message,
       });
     }
-  };
+  },  
+
+  readFieldById: (Model, modelName) => async (req, res) => {
+    const { _id, field } = req.params;
   
-  module.exports = {
-    readItem,
-    readItemBySlug,
-    readItemByField,
-  };
+    try {
+      if (!Object.keys(Model.schema.paths).includes(field)) {
+        return res.status(400).json({ message: `Field '${field}' not found in ${modelName}` });
+      }
   
+      const item = await Model.findById(_id).select(`${field} _id`);
+  
+      if (!item) {
+        return res.status(404).json({ message: `${modelName} not found` });
+      }
+  
+      res.status(200).json({
+     
+        [field]: item[field],
+      });
+    } catch (error) {
+      res.status(500).json({
+        message: `Error fetching ${modelName}`,
+        error: error.message,
+      });
+    }
+  },  
+ 
+};
+
+module.exports = singleRead;
