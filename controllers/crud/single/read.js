@@ -1,16 +1,8 @@
-const verifyVideoAccess = require('../../../utils/verifyAccess');
 
 const singleRead = {
   readItem: (Model, modelName) => async (req, res) => {
     try {
       const item = await Model.findById(req.params._id);
-
-      if (modelName.toLowerCase() === 'video') {
-        const accessGranted = await verifyVideoAccess(req.user, item);
-        if (!accessGranted) {
-          return res.status(403).json({ message: 'Access denied to this video' });
-        }
-      }
 
       if (!item) {
         return res.status(404).json({ message: `${modelName} not found` });
@@ -28,12 +20,6 @@ const singleRead = {
     try {
       const item = await Model.findOne({ slug: req.params.slug });
 
-      if (modelName.toLowerCase() === 'video') {
-        const accessGranted = await verifyVideoAccess(req.user, item);
-        if (!accessGranted) {
-          return res.status(403).json({ message: 'Access denied to this video' });
-        }
-      }
 
       if (!item) {
         return res.status(404).json({ message: `${modelName} not found` });
