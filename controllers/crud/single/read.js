@@ -4,6 +4,8 @@ const singleRead = {
     try {
       const item = await Model.findById(req.params._id);
 
+    
+
       if (!item) {
         return res.status(404).json({ message: `${modelName} not found` });
       }
@@ -20,6 +22,7 @@ const singleRead = {
     try {
       const item = await Model.findOne({ slug: req.params.slug });
 
+      
 
       if (!item) {
         return res.status(404).json({ message: `${modelName} not found` });
