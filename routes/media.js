@@ -100,7 +100,7 @@ router.get('/download/:mediaType/:filename', async (req, res) => {
 });
 
 router.get('/api/v1/media', async (req, res) => {
-  const { mediaType, searchQuery, page = 1, limit = 10 } = req.query; // Query parameters for filtering and pagination
+  const { mediaType, searchQuery, page = 1, limit = 1000 } = req.query; // Query parameters for filtering and pagination
 
   try {
       // Base query for fetching media
