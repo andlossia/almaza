@@ -2,45 +2,58 @@ const { Readable, pipeline } = require('stream');
 const { cloudBucket } = require('../utils/googleCloudStorage');
 const path = require('path');
 const fs = require('fs');
-const fsPromises = require('fs').promises;  // Promises version of fs
+const fsPromises = require('fs').promises;
 const dotenv = require('dotenv');
 const multer = require('multer');
 const Media = require('../models/mediaModel');
 const { getBucket } = require('../database');
-const { console } = require('inspector');
 
 dotenv.config();
 
 
+if (!process.env.KEYFILENAME || !process.env.BUCKET_NAME) {
+  throw new Error('Missing required environment variables: KEYFILENAME or BUCKET_NAME');
+}
 
-const mediaExtensions = {
-  image: ['.png', '.jpg', '.gif', '.jpeg', '.bmp', '.svg', '.webp'],
-  video: ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm'],
-  audio: ['.mp3', '.wav', '.ogg', '.wma', '.aac', '.flac', '.alac'],
-  file: ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.csv'],
+
+const mediaTypesSchema = {
+  image: {
+    mediaExtensions: ['.png', '.jpg', '.gif', '.jpeg', '.bmp', '.svg', '.webp'],
+    mimeTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/svg+xml', 'image/webp', 'image/bmp'],
+    fileSizeLimits: 50 * 1024 * 1024, // 50MB
+  },
+  video: {
+    mediaExtensions: ['.mp4', '.avi', '.mov', '.wmv', '.flv', '.mkv', '.webm'],
+    mimeTypes: ['video/mp4', 'video/x-msvideo', 'video/quicktime', 'video/x-ms-wmv', 'video/x-flv', 'video/x-matroska', 'video/webm'],
+    fileSizeLimits: 2 * 1024 * 1024 * 1024, // 2GB
+  },
+  audio: {
+    mediaExtensions: ['.mp3', '.wav', '.ogg', '.wma', '.aac', '.flac', '.alac'],
+    mimeTypes: ['audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/x-ms-wma', 'audio/aac', 'audio/flac', 'audio/alac'],
+    fileSizeLimits: 12 * 1024 * 1024, // 12MB
+  },
+  file: {
+    mediaExtensions: ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.txt', '.json', '.xml'],
+    mimeTypes: ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'text/csv', 'text/plain', 'application/json', 'application/xml'],
+    fileSizeLimits: 150 * 1024 * 1024, // 150MB
+  },
 };
 
-// Define MIME types for media types
-const mimeTypes = {
-  image: 'image/jpeg',
-  video: 'video/mp4',
-  audio: 'audio/mpeg',
-  file: 'application/octet-stream',
+// Helper to get media type by extension
+const getMediaType = (ext) => {
+  const mediaType = Object.keys(mediaTypesSchema).find((type) =>
+    mediaTypesSchema[type].mediaExtensions.includes(ext.toLowerCase())
+  ) || 'unknown';
+  return mediaType;
 };
 
-// Map extensions to their respective media types
-const mediaTypeMap = Object.entries(mediaExtensions).reduce((acc, [type, exts]) => {
-  exts.forEach(ext => acc[ext] = type);
-  return acc;
-}, {});
+// Helper to get MIME type by media type
+const getMimeTypes = (mediaType) => {
+  return mediaTypesSchema[mediaType]?.mimeTypes || [];
+};
 
-const getMediaType = (ext) => mediaTypeMap[ext] || 'unknown';
-const getMimeType = (mediaType) => mimeTypes[mediaType] || 'application/octet-stream';
-
-// Define file size limits per media type
-const fileSizeLimits = {
-  image: 50 * 1024 * 1024, // 50MB
-  video: 2 * 1024 * 1024 * 1024, // 2GB
+const getFileSizeLimit = (mediaType) => {
+  return mediaTypesSchema[mediaType]?.fileSizeLimits || 0;
 };
 
 // Multer file filter to validate file type and size
@@ -48,49 +61,51 @@ const fileFilter = (req, file, cb) => {
   const ext = path.extname(file.originalname).toLowerCase();
   const mediaType = getMediaType(ext);
 
-  if (!Object.values(mediaExtensions).flat().includes(ext)) {
+  if (mediaType === 'unknown') {
     return cb(new Error('Invalid file type.'));
   }
 
-  const sizeLimit = fileSizeLimits[mediaType];
-  if (file.size > sizeLimit) {  
+  const sizeLimit = getFileSizeLimit(mediaType);
+
+  if (file.size > sizeLimit) {
     return cb(new Error(`File size exceeds the limit for ${mediaType}.`));
   }
 
   cb(null, true);
 };
 
+
 // Configure Multer storage to save files temporarily on disk
 const storage = multer.diskStorage({
   destination: async (req, file, cb) => {
     const uploadPath = path.join('uploads', req.user.id || 'default');
+
     try {
       await fsPromises.mkdir(uploadPath, { recursive: true });
+
       cb(null, uploadPath);
     } catch (err) {
       cb(err);  // Pass any error to the callback
     }
   },
   filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${sanitizeFilename(file.originalname)}`);
-  },
+    const sanitizedFileName = file.originalname.replace(/[^a-zA-Z0-9.-_]/g, '_');
+    const fileName = `${Date.now()}-${sanitizedFileName}`;
+    cb(null, fileName);
+    },
 });
 
-// Initialize Multer with storage and file filter
 const upload = multer({
   storage,
-  limits: { fileSize: Math.max(...Object.values(fileSizeLimits)) },
+  limits: { fileSize: Math.max(...Object.values(mediaTypesSchema).map((type) => type.fileSizeLimits)) },
   fileFilter,
 });
 
-// Sanitize filenames by removing unsafe characters
-const sanitizeFilename = (name) => name.replace(/[^a-zA-Z0-9.-_]/g, '_');
 
 // Delete temporary files after processing
 const cleanupFile = async (filePath) => {
   try {
     await fsPromises.unlink(filePath);
-    console.log(`Temporary file ${filePath} deleted.`);
   } catch (err) {
     console.error(`Failed to delete file ${filePath}:`, err.message);
   }
@@ -98,12 +113,15 @@ const cleanupFile = async (filePath) => {
 
 // Create or update media metadata in MongoDB
 const createOrUpdateMedia = async (mediaData) => {
+
   const existingMedia = await Media.findOne({ url: mediaData.url });
 
   if (existingMedia) {
+
     await Media.updateOne({ _id: existingMedia._id }, mediaData);
     return existingMedia._id;
   } else {
+
     const newMedia = new Media(mediaData);
     await newMedia.save();
     return newMedia._id;
@@ -112,20 +130,31 @@ const createOrUpdateMedia = async (mediaData) => {
 
 // Upload file to Google Cloud Storage
 const uploadToGoogleCloud = async (fileStream, originalname, mimetype) => {
+
+  const baseurl = `https://storage.googleapis.com`;
   const gcsFileName = `media/${Date.now()}-${encodeURIComponent(originalname)}`;
   const mediaBlob = cloudBucket.file(gcsFileName);
 
   return new Promise((resolve, reject) => {
     const mediaStreamUpload = mediaBlob.createWriteStream({
       metadata: { contentType: mimetype },
-      resumable: true,
+      resumable: true, // Ensures resumable uploads
     });
 
+    let uploadedBytes = 0;
+
+    // Handle stream events
     fileStream
+      .on('data', (chunk) => {
+        uploadedBytes += chunk.length;
+      })
       .pipe(mediaStreamUpload)
-      .on('error', (err) => reject(new Error('Failed to upload to GCS: ' + err.message)))
+      .on('error', (err) => {
+        console.error('Failed to upload to GCS:', err.message);
+        reject(new Error(`Failed to upload to GCS: ${err.message}`));
+      })
       .on('finish', () => {
-        const publicUrl = `https://storage.googleapis.com/${cloudBucket.name}/${gcsFileName}`;
+        const publicUrl = `${baseurl}/${cloudBucket.name}/${gcsFileName}`;
         resolve(publicUrl);
       });
   });
@@ -134,93 +163,69 @@ const uploadToGoogleCloud = async (fileStream, originalname, mimetype) => {
 // Process file upload (supports videos and other media types)
 const processFileUpload = async (file, body, user) => {
   const { mimetype, buffer, originalname } = file;
+
   const ext = path.extname(originalname).toLowerCase();
   const mediaType = getMediaType(ext);
-  const owner = user ? user.id : null;
+  const owner = user?.id || null;
+
+  // Validate file data
+  if (!buffer && !file.path) {
+    throw new Error('No valid file data available for upload.');
+  }
+
+  const fileStream = buffer ? Readable.from(buffer) : fs.createReadStream(file.path);
+
+  const generateSlug = (type) => `${type}-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+  const createMediaData = (url) => ({
+    fileName: body.fileName || originalname,
+    altText: body.altText || '',
+    slug: generateSlug(mediaType),
+    url,
+    owner,
+    mediaType,
+  });
 
   try {
+    let uploadUrl;
+
     if (mediaType === 'video') {
-      // Handle video upload
-      if (!buffer) {
-        console.log('No buffer available for video upload.');
-      }
-
-      const fileStream = Readable.from(buffer);
-      const googleCloudUrl = await uploadToGoogleCloud(fileStream, originalname, mimetype);
-
-      const videoData = {
-        fileName: body.fileName || originalname,
-        altText: body.altText || '',
-        slug: `video-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-        url: googleCloudUrl,
-        owner,
-        mediaType,
-      };
-
-      const mediaId = await createOrUpdateMedia(videoData);
-      await cleanupFile(file.path); // Cleanup temp file if needed
-      return mediaId;
+      // Handle video uploads to Google Cloud Storage
+      uploadUrl = await uploadToGoogleCloud(fileStream, originalname, mimetype);
     } else {
-      // Handle non-video media types (e.g., image, document, etc.)
-      if (!buffer && !file.path) {
-        throw new Error('No buffer or path available for file upload.');
-      }
-
+      // Handle non-video uploads to MongoDB GridFS
       const uploadStream = getBucket().openUploadStream(originalname, {
         contentType: mimetype,
         metadata: { mediaType },
       });
 
       await new Promise((resolve, reject) => {
-        pipeline(
-          buffer ? Readable.from(buffer) : fs.createReadStream(file.path), 
-          uploadStream,
-          (err) => {
-            if (err) {
-              reject(new Error('Error uploading file to MongoDB.'));
-            } else {
-              resolve();
-            }
-          }
-        );
+        pipeline(fileStream, uploadStream, (err) => {
+          if (err) reject(new Error('Error uploading file to MongoDB GridFS.'));
+          else resolve();
+        });
       });
 
-      const mediaData = {
-        fileName: body.fileName || originalname,
-        altText: body.altText || '',
-        slug: `${mediaType}-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-        url: `/uploads/${mediaType}/${originalname}`,
-        owner,
-        mediaType,
-      };
-
-      const mediaId = await createOrUpdateMedia(mediaData);
-      await cleanupFile(file.path); // Cleanup temp file if needed
-      return mediaId;
+      uploadUrl = `/uploads/${mediaType}/${originalname}`;
     }
-  } catch (error) {
-    console.error('Error in file upload process:', error);
 
-    // Attempt fallback upload if primary upload fails
+    const mediaData = createMediaData(uploadUrl);
+    const mediaId = await createOrUpdateMedia(mediaData);
+
+    if (file.path) await cleanupFile(file.path); // Cleanup temp file
+    return mediaId;
+
+  } catch (primaryError) {
+    console.error('Primary upload failed:', primaryError);
+
+    // Fallback to Google Cloud Storage for all media types
     try {
-      if (!buffer && !file.path) {
-        throw new Error('No file data available for fallback upload.');
-      }
+      const fallbackStream = buffer ? Readable.from(buffer) : fs.createReadStream(file.path);
+      const fallbackUrl = await uploadToGoogleCloud(fallbackStream, originalname, mimetype);
 
-      const fileStream = buffer ? Readable.from(buffer) : fs.createReadStream(file.path);
-      const googleCloudUrl = await uploadToGoogleCloud(fileStream, originalname, mimetype);
-
-      const fallbackMediaData = {
-        fileName: body.fileName || originalname,
-        altText: body.altText || '',
-        slug: `${mediaType}-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-        url: googleCloudUrl,
-        owner,
-        mediaType,
-      };
-
+      const fallbackMediaData = createMediaData(fallbackUrl);
       const mediaId = await createOrUpdateMedia(fallbackMediaData);
-      await cleanupFile(file.path); // Cleanup temp file if needed
+
+      if (file.path) await cleanupFile(file.path); // Cleanup temp file
       return mediaId;
     } catch (fallbackError) {
       console.error('Fallback upload failed:', fallbackError);
@@ -229,9 +234,11 @@ const processFileUpload = async (file, body, user) => {
   }
 };
 
+
 // Middleware for handling file uploads dynamically
 const dynamicUpload = (req, res, next) => {
   const fieldName = req.body.fieldName || 'file';
+
   const multerUpload = upload.single(fieldName);
 
   multerUpload(req, res, async (err) => {
@@ -243,6 +250,7 @@ const dynamicUpload = (req, res, next) => {
 
     try {
       if (req.file) {
+
         const mediaId = await processFileUpload(req.file, req.body, req.user);
         req.media = await Media.findById(mediaId);
         res.status(201).json({ message: 'File uploaded successfully', media: req.media });
@@ -260,4 +268,4 @@ const dynamicUpload = (req, res, next) => {
   });
 };
 
-module.exports = { upload, mediaExtensions, dynamicUpload, getMediaType, getMimeType };
+module.exports = { upload, dynamicUpload, getMediaType, getMimeTypes };
